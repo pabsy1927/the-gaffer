@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#0a0f1a"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="The Gaffer"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+<link rel="manifest" href="manifest.json"/>
+<title>The Gaffer ⚽</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0f1a;color:#fff;font-family:'Barlow Condensed',sans-serif;min-height:100vh}
+.tab{background:none;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:12px 13px;color:rgba(255,255,255,0.35);border-bottom:3px solid transparent;white-space:nowrap}
+.tab.on{color:#00e676;border-bottom-color:#00e676}
+.card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:13px;padding:15px;margin-bottom:10px}
+.mbg{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:300;padding:16px}
+.mbox{background:#111c2a;border:1px solid rgba(255,255,255,0.13);border-radius:18px;padding:24px;width:360px;max-width:100%;max-height:90vh;overflow-y:auto}
+input[type=range]{accent-color:#00e676;width:100%}
+input[type=checkbox]{accent-color:#00e676;width:15px;height:15px;cursor:pointer}
+.abt{border:none;border-radius:8px;padding:7px 14px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}.pulse{animation:pulse 1.5s infinite}
+</style>
+</head>
+<body>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:12px"><div style="font-size:44px">⚽</div><div style="color:#00e676;letter-spacing:3px">LOADING...</div></div></div>
+
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+import{getDatabase,ref,set,get,remove,onValue}from"https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js";
+const db=getDatabase(initializeApp({apiKey:"AIzaSyCBSfQ4N9DMfSS5UHSRAHhd2kTWaCYeIzQ",authDomain:"the-gaffer-7ba1f.firebaseapp.com",databaseURL:"https://the-gaffer-7ba1f-default-rtdb.firebaseio.com",projectId:"the-gaffer-7ba1f",storageBucket:"the-gaffer-7ba1f.firebasestorage.app",messagingSenderId:"64406560723",appId:"1:64406560723:web:b1c0b56cdebc1419d75926"}));
+window.DB={
+  async get(k,fb){try{const s=await get(ref(db,k));return s.exists()?s.val():fb}catch{return fb}},
+  async set(k,v){try{await set(ref(db,k),v)}catch{}},
+  async del(k){try{await remove(ref(db,k))}catch{}},
+  on(k,cb){return onValue(ref(db,k),s=>cb(s.exists()?s.val():null))}
+};
+window.dispatchEvent(new Event("fb-ready"));
+</script>
+
+<script>
+// ── Wait for Firebase then boot ──────────────────────────────────────────────
+window.addEventListener("fb-ready",boot,{once:true});
+
+const PIN="1927";
+const RED="#ef4444",BLUE="#3b82f6";
+const PC={GK:"#f59e0b",DEF:"#3b82f6",MID:"#22c55e",FWD:"#ef4444",ANY:"#a855f7"};
+const pc=p=>PC[p]||"#888";
+const INIT=[
+  {id:1,name:"Jamie Clarke",pos:"GK",skill:7,games:12,active:true,paid:false},
+  {id:2,name:"Marcus Webb",pos:"DEF",skill:8,games:15,active:true,paid:false},
+  {id:3,name:"Liam Torres",pos:"MID",skill:9,games:10,active:true,paid:false},
+  {id:4,name:"Danny Shaw",pos:"FWD",skill:8,games:14,active:true,paid:false},
+  {id:5,name:"Karl Reid",pos:"MID",skill:6,games:8,active:true,paid:false},
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let S={
+  ready:false, tab:"Squad", isGaffer:false,
+  players:[], sessions:[], avail:{},
+  teams:null, activePoll:null, pollVotes:{},
+  payHistory:[], float:0, pitchCost:54, playerCost:6,
+  // modals
+  addOpen:false, sessionOpen:false, pinOpen:false, paySettings:false,
+  editId:null, confirmId:null, pollCopied:false, pinError:false, pinVal:"",
+  // forms
+  newP:{name:"",pos:"MID",skill:5,games:0,active:true,paid:false},
+  sf:{date:"",result:"",notes:"",ids:[]},
+  editF:{},
+};
+let pollUnsub=null;
+
+function set$1(updates){ Object.assign(S,updates); render(); }
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const nextWed=()=>{const d=new Date();const df=(3-d.getDay()+7)%7||7;d.setDate(d.getDate()+df);return d.toISOString().slice(0,10)};
+const avg=arr=>arr.length?(arr.reduce((s,p)=>s+p.skill,0)/arr.length).toFixed(1):"–";
+const active=()=>S.players.filter(p=>p.active);
+const inP=()=>active().filter(p=>S.avail[p.id]==="in");
+const outP=()=>active().filter(p=>S.avail[p.id]==="out");
+const unknownP=()=>active().filter(p=>!S.avail[p.id]);
+const payingPlayers=()=>S.teams?[...S.teams[0],...S.teams[1]]:inP();
+const weekIncome=()=>payingPlayers().filter(p=>p.paid).length*S.playerCost;
+const weekProfit=()=>weekIncome()-S.pitchCost;
+
+// ── Firebase save helpers ────────────────────────────────────────────────────
+const save=async(key,val)=>DB.set("private/"+key,val);
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+async function boot(){
+  const[pl,ss,av,ap,ph,fl,pc2,pl2]=await Promise.all([
+    DB.get("private/players",INIT),
+    DB.get("private/sessions",[]),
+    DB.get("private/avail",{}),
+    DB.get("private/activepoll",null),
+    DB.get("private/payhistory",[]),
+    DB.get("private/float",0),
+    DB.get("private/pitchcost",54),
+    DB.get("private/playercost",6),
+  ]);
+  try{if(sessionStorage.getItem("gfr_auth")===PIN)S.isGaffer=true}catch(e){}
+  S.players=Array.isArray(pl)?pl:INIT;
+  S.sessions=Array.isArray(ss)?ss:[];
+  S.avail=av||{};
+  S.activePoll=ap;
+  S.payHistory=Array.isArray(ph)?ph:[];
+  S.float=fl||0;
+  S.pitchCost=pc2||54;
+  S.playerCost=pl2||6;
+  S.sf.date=nextWed();
+  S.ready=true;
+  if(ap){pollUnsub=DB.on("shared/votes_"+ap.id,v=>{S.pollVotes=v||{};render()});}
+
+  // Poll URL
+  const urlPoll=new URLSearchParams(location.search).get("poll");
+  if(urlPoll){renderPoll(urlPoll);return;}
+  render();
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+function login(){if(S.pinVal===PIN){try{sessionStorage.setItem("gfr_auth",PIN)}catch(e){}set$1({isGaffer:true,pinOpen:false,pinVal:"",pinError:false})}else{set$1({pinError:true,pinVal:""});setTimeout(()=>set$1({pinError:false}),1500)}}
+function logout(){try{sessionStorage.removeItem("gfr_auth")}catch(e){}set$1({isGaffer:false})}
+
+function saveAvail(a){S.avail=a;save("avail",a);render();}
+function resetAvail(){
+  const empty={};
+  saveAvail(empty);
+  if(S.activePoll){S.pollVotes={};DB.set("shared/votes_"+S.activePoll.id,{});}
+  render();
+}
+
+function toggleAvail(id,val){
+  const a={...S.avail};
+  if(a[id]===val)delete a[id]; else a[id]=val;
+  saveAvail(a);
+}
+
+function savePlayers(pl){S.players=pl;save("players",pl);render();}
+function removePlayer(id){savePlayers(S.players.filter(p=>p.id!==id));set$1({confirmId:null});}
+function saveEdit(){savePlayers(S.players.map(p=>p.id===S.editId?{...S.editF}:p));set$1({editId:null});}
+function addPlayer(){
+  if(!S.newP.name.trim())return;
+  savePlayers([...S.players,{...S.newP,id:Date.now()}]);
+  set$1({addOpen:false,newP:{name:"",pos:"MID",skill:5,games:0,active:true,paid:false}});
+}
+function togglePaid(id){savePlayers(S.players.map(p=>p.id===id?{...p,paid:!p.paid}:p));}
+
+// Teams
+function applyPins(t1,t2,pool){
+  const bash=pool.find(p=>p.name.toLowerCase().startsWith("bash")&&p.pos==="GK");
+  const mike=pool.find(p=>p.name.toLowerCase().startsWith("mike")&&p.pos==="GK");
+  let a=[...t1],b=[...t2];
+  if(bash){b=b.filter(p=>p.id!==bash.id);if(!a.find(p=>p.id===bash.id)){a=a.filter(p=>p.id!==bash.id);a.unshift(bash);}}
+  if(mike){a=a.filter(p=>p.id!==mike.id);if(!b.find(p=>p.id===mike.id)){b=b.filter(p=>p.id!==mike.id);b.unshift(mike);}}
+  return[a,b];
+}
+function pool(){return inP().length>=2?inP():active();}
+function genRandom(){const p=[...pool()].sort(()=>Math.random()-.5);const[a,b]=applyPins(p.filter((_,i)=>i%2===0),p.filter((_,i)=>i%2===1),pool());set$1({teams:[a,b]});}
+function genBalance(){const p=[...pool()].sort((a,b)=>b.skill-a.skill);const t1=[],t2=[];p.forEach((x,i)=>(i%2===0?t1:t2).push(x));const[a,b]=applyPins(t1,t2,pool());set$1({teams:[a,b]});}
+function swapPlayer(pid,fromTeam){
+  const other=fromTeam===0?1:0;
+  const player=S.teams[fromTeam].find(p=>p.id===pid);
+  if(!player)return;
+  const t=[...S.teams];
+  t[fromTeam]=t[fromTeam].filter(p=>p.id!==pid);
+  t[other]=[...t[other],player];
+  set$1({teams:t});
+}
+
+// Session
+function logSession(){
+  const s=[{id:Date.now(),date:S.sf.date,result:S.sf.result,notes:S.sf.notes,playerIds:S.sf.ids,count:S.sf.ids.length},...S.sessions];
+  const pl=S.players.map(p=>S.sf.ids.includes(p.id)?{...p,games:p.games+1}:p);
+  S.sessions=s;S.players=pl;
+  save("sessions",s);save("players",pl);
+  set$1({sessionOpen:false,sf:{date:nextWed(),result:"",notes:"",ids:[]}});
+}
+
+// Payments
+function closeWeek(){
+  const nw=new Date();const df=(3-nw.getDay()+7)%7||7;nw.setDate(nw.getDate()+df);
+  const label=nw.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+  const pp=payingPlayers();
+  const paid=pp.filter(p=>p.paid).map(p=>p.name);
+  const unpaid=pp.filter(p=>!p.paid).map(p=>p.name);
+  const newFloat=S.float+weekProfit();
+  const entry={id:Date.now(),label,paid,unpaid,income:weekIncome(),cost:S.pitchCost,profit:weekProfit(),float:newFloat};
+  S.payHistory=[entry,...S.payHistory];
+  S.float=newFloat;
+  const pl=S.players.map(p=>({...p,paid:false}));
+  S.players=pl;
+  save("payhistory",S.payHistory);save("float",newFloat);save("players",pl);
+  render();
+}
+
+// Poll
+async function createPoll(){
+  const id=Date.now().toString(36);
+  const nw=new Date();const df=(3-nw.getDay()+7)%7||7;nw.setDate(nw.getDate()+df);
+  const date=nw.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" at 7pm";
+  const poll={id,title:"⚽ Football this week",date};
+  await DB.set("shared/poll_"+id,poll);
+  await DB.set("shared/votes_"+id,{});
+  if(pollUnsub)pollUnsub();
+  pollUnsub=DB.on("shared/votes_"+id,v=>{S.pollVotes=v||{};render();});
+  S.activePoll=poll;S.pollVotes={};
+  save("activepoll",poll);render();
+}
+async function closePoll(){
+  if(!S.activePoll)return;
+  const na={};active().forEach(p=>{if(S.pollVotes[p.id])na[p.id]=S.pollVotes[p.id];});
+  await DB.del("shared/poll_"+S.activePoll.id);
+  await DB.del("shared/votes_"+S.activePoll.id);
+  if(pollUnsub){pollUnsub();pollUnsub=null;}
+  S.activePoll=null;S.pollVotes={};S.avail=na;
+  save("activepoll",null);save("avail",na);render();
+}
+function copyLink(){
+  const link=location.origin+location.pathname+"?poll="+S.activePoll.id;
+  navigator.clipboard.writeText(link).then(()=>{set$1({pollCopied:true});setTimeout(()=>set$1({pollCopied:false}),2000);});
+}
+function waTeams(){
+  if(!S.teams)return"#";
+  const nw=new Date();const df=(3-nw.getDay()+7)%7||7;nw.setDate(nw.getDate()+df);
+  const date=nw.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  const msg=["⚽ *Tonight's Teams — "+date+" at 7pm*","","🔴 *TEAM RED*",...S.teams[0].map(p=>"• "+p.name+(p.pos==="GK"?" (GK)":"")),"","🔵 *TEAM BLUE*",...S.teams[1].map(p=>"• "+p.name+(p.pos==="GK"?" (GK)":"")),"","See you there! ⚽"].join("\n");
+  return"https://wa.me/?text="+encodeURIComponent(msg);
+}
+function waPoll(){
+  if(!S.activePoll)return"#";
+  const link=location.origin+location.pathname+"?poll="+S.activePoll.id;
+  const msg=["⚽ *Football this week — "+S.activePoll.date+"*","","Tap the link to vote IN or OUT 👇","",link,"","Results update live!"].join("\n");
+  return"https://wa.me/?text="+encodeURIComponent(msg);
+}
+
+// ── HTML builders ─────────────────────────────────────────────────────────────
+const h=(tag,attrs,content)=>{
+  const el=document.createElement(tag);
+  if(attrs)Object.entries(attrs).forEach(([k,v])=>{
+    if(k==="style"&&typeof v==="object")Object.assign(el.style,v);
+    else if(k.startsWith("on")&&typeof v==="function")el.addEventListener(k.slice(2).toLowerCase(),v);
+    else el.setAttribute(k,v);
+  });
+  if(content!==undefined){
+    if(Array.isArray(content))content.flat(Infinity).forEach(c=>c&&el.appendChild(typeof c==="string"?document.createTextNode(c):c));
+    else if(typeof content==="string")el.textContent=content;
+    else if(content instanceof Element)el.appendChild(content);
+  }
+  return el;
+};
+const div=(a,c)=>h("div",a,c);
+const btn=(a,c)=>h("button",a,c);
+const inp=(a)=>h("input",a);
+const span=(a,c)=>h("span",a,c);
+const txt=(s)=>document.createTextNode(s);
+
+function B(label,onclick,opts={}){
+  const{bg=opts.danger?"rgba(239,68,68,0.15)":opts.ghost?"rgba(255,255,255,0.08)":"#00e676",fg=opts.danger?"#ef4444":opts.ghost?"#ccc":"#000",sm}=opts;
+  return btn({onclick,style:{background:bg,color:fg,border:"none",borderRadius:8,padding:sm?"6px 12px":"9px 18px",fontWeight:700,cursor:"pointer",fontSize:sm?12:13,fontFamily:"inherit",letterSpacing:.4}},label);
+}
+
+function skillDots(value){
+  const wrap=div({style:{display:"flex",gap:"3px",alignItems:"center"}});
+  for(let i=0;i<10;i++){
+    wrap.appendChild(div({style:{width:"14px",height:"14px",borderRadius:"3px",background:i<value?"hsl("+(115-i*9)+",75%,48%)":"rgba(255,255,255,0.1)"}}));
+  }
+  wrap.appendChild(span({style:{fontSize:"12px",color:"#888",marginLeft:"4px"}},value+"/10"));
+  return wrap;
+}
+
+function iBox(type,val,onchange,placeholder,extraStyle={}){
+  const el=inp({type:type||"text",placeholder:placeholder||"",style:{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",borderRadius:"8px",padding:"9px 12px",fontSize:"14px",outline:"none",fontFamily:"inherit",width:"100%",...extraStyle}});
+  if(val!==undefined)el.value=val;
+  if(onchange)el.addEventListener("input",e=>onchange(e.target.value));
+  return el;
+}
+
+function selBox(options,val,onchange){
+  const el=h("select",{style:{background:"#151f2e",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",borderRadius:"8px",padding:"9px 12px",fontSize:"14px",outline:"none",fontFamily:"inherit"}},
+    options.map(o=>h("option",{value:o},o))
+  );
+  el.value=val;
+  el.addEventListener("change",e=>onchange(e.target.value));
+  return el;
+}
+
+function sLabel(text){
+  return div({style:{fontSize:"10px",letterSpacing:"2px",color:"rgba(255,255,255,0.4)",textTransform:"uppercase",margin:"18px 0 8px"}},text);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(){
+  if(!S.ready)return;
+  const root=document.getElementById("root");
+  root.innerHTML="";
+  root.appendChild(buildApp());
+}
+
+function buildApp(){
+  const wrap=div({style:{minHeight:"100vh",background:"#0a0f1a"}});
+
+  // Header
+  const pollInC=Object.values(S.pollVotes).filter(v=>v==="in").length;
+  const header=div({style:{background:"linear-gradient(135deg,#0c1e10,#0a0f1a)",borderBottom:"1px solid rgba(255,255,255,0.07)"}});
+  const hInner=div({style:{maxWidth:"740px",margin:"0 auto",padding:"18px 16px 0"}});
+  const hTop=div({style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px"}});
+
+  const titleBlock=div({},[
+    div({style:{fontSize:"10px",letterSpacing:"4px",color:"#00e676",marginBottom:"3px"}},"⚽ 5-A-SIDE MANAGER"),
+    div({style:{fontSize:"32px",fontWeight:900,letterSpacing:"1px"}},"THE GAFFER"),
+    S.isGaffer?div({style:{marginTop:"6px",display:"flex",gap:"8px",alignItems:"center"}},[
+      span({style:{fontSize:"10px",background:"rgba(0,230,118,0.15)",color:"#00e676",border:"1px solid rgba(0,230,118,0.3)",padding:"3px 10px",borderRadius:"20px",fontWeight:700,letterSpacing:1}},"🔓 GAFFER MODE"),
+      btn({onclick:logout,style:{fontSize:"10px",background:"rgba(255,255,255,0.08)",color:"#888",border:"none",borderRadius:"20px",padding:"3px 10px",cursor:"pointer",fontFamily:"inherit",fontWeight:700}},"Logout"),
+    ]):btn({onclick:()=>set$1({pinOpen:true}),style:{marginTop:"6px",fontSize:"11px",background:"rgba(255,255,255,0.07)",color:"rgba(255,255,255,0.5)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:"20px",padding:"4px 12px",cursor:"pointer",fontFamily:"inherit",fontWeight:700}},"🔐 Gaffer Login"),
+  ]);
+
+  const stats=[
+    {v:active().length,l:"SQUAD",c:"#00e676"},
+    {v:inP().length,l:"IN",c:inP().length>0?BLUE:"rgba(255,255,255,0.25)"},
+    {v:active().filter(p=>p.paid).length,l:"PAID",c:active().filter(p=>p.paid).length>0?"#22c55e":"rgba(255,255,255,0.25)"},
+    ...(S.isGaffer?[{v:avg(active()),l:"AVG SKL",c:"#f59e0b"}]:[]),
+  ];
+  const statsEl=div({style:{display:"flex",gap:"14px",textAlign:"center"}},
+    stats.map(x=>div({},[div({style:{fontSize:"22px",fontWeight:800,color:x.c,lineHeight:1}},String(x.v)),div({style:{fontSize:"9px",color:"rgba(255,255,255,0.4)",letterSpacing:"1px"}},x.l)]))
+  );
+
+  hTop.appendChild(titleBlock);hTop.appendChild(statsEl);
+
+  const tabs=["Squad","Availability","Payments","Teams","History","Stats"];
+  const tabRow=div({style:{display:"flex",overflowX:"auto"}},
+    tabs.map(t=>{
+      const label=t==="Availability"&&S.activePoll?t+" 🔴":t;
+      const b=btn({onclick:()=>set$1({tab:t}),style:{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:"13px",fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",padding:"12px 13px",color:S.tab===t?"#00e676":"rgba(255,255,255,0.35)",borderBottom:S.tab===t?"3px solid #00e676":"3px solid transparent",whiteSpace:"nowrap"}},label);
+      return b;
+    })
+  );
+
+  hInner.appendChild(hTop);hInner.appendChild(tabRow);
+  header.appendChild(hInner);
+  wrap.appendChild(header);
+
+  const body=div({style:{maxWidth:"740px",margin:"0 auto",padding:"20px 16px 60px"}});
+
+  if(S.tab==="Squad")body.appendChild(buildSquad());
+  else if(S.tab==="Availability")body.appendChild(buildAvail());
+  else if(S.tab==="Payments")body.appendChild(buildPayments());
+  else if(S.tab==="Teams")body.appendChild(buildTeams());
+  else if(S.tab==="History")body.appendChild(buildHistory());
+  else if(S.tab==="Stats")body.appendChild(buildStats());
+
+  wrap.appendChild(body);
+
+  // Modals
+  if(S.pinOpen)wrap.appendChild(buildPinModal());
+  if(S.addOpen)wrap.appendChild(buildAddModal());
+  if(S.sessionOpen)wrap.appendChild(buildSessionModal());
+
+  return wrap;
+}
+
+// ── Squad ─────────────────────────────────────────────────────────────────────
+function buildSquad(){
+  const wrap=div({});
+  const hdr=div({style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}});
+  hdr.appendChild(div({style:{fontSize:"20px",fontWeight:800}},"Squad ("+S.players.length+")"));
+  if(S.isGaffer)hdr.appendChild(B("+ Add Player",()=>set$1({addOpen:true})));
+  wrap.appendChild(hdr);
+
+  S.players.forEach(p=>{
+    const card=div({class:"card",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"13px",padding:"15px",marginBottom:"10px"}});
+    if(S.isGaffer&&S.editId===p.id){
+      // Edit form
+      const nameRow=div({style:{display:"flex",gap:"8px",marginBottom:"10px"}});
+      const nameIn=iBox("text",S.editF.name,v=>S.editF.name=v,"Name");
+      const posIn=selBox(["GK","DEF","MID","FWD","ANY"],S.editF.pos,v=>S.editF.pos=v);
+      posIn.style.width="90px";
+      nameRow.appendChild(nameIn);nameRow.appendChild(posIn);
+
+      const skillLbl=div({style:{fontSize:"11px",color:"#888",marginBottom:"5px"}},"SKILL: "+S.editF.skill+"/10");
+      const skillIn=inp({type:"range",min:1,max:10,style:{width:"100%",accentColor:"#00e676"}});
+      skillIn.value=S.editF.skill;
+      skillIn.addEventListener("input",e=>{S.editF.skill=+e.target.value;skillLbl.textContent="SKILL: "+S.editF.skill+"/10";});
+
+      const gamesWrap=div({style:{marginBottom:"10px"}});
+      const gamesLbl=div({style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},"GAMES");
+      const gamesIn=iBox("number",S.editF.games,v=>S.editF.games=+v);
+      gamesWrap.appendChild(gamesLbl);gamesWrap.appendChild(gamesIn);
+
+      const activeLbl=h("label",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer",marginBottom:"10px"}});
+      const activeCb=inp({type:"checkbox"});activeCb.checked=S.editF.active;
+      activeCb.addEventListener("change",e=>S.editF.active=e.target.checked);
+      activeLbl.appendChild(activeCb);activeLbl.appendChild(txt("Active player"));
+
+      const btnRow=div({style:{display:"flex",gap:"8px"}});
+      btnRow.appendChild(B("Save",saveEdit));
+      btnRow.appendChild(B("Cancel",()=>set$1({editId:null}),{ghost:true}));
+
+      card.appendChild(nameRow);card.appendChild(skillLbl);card.appendChild(skillIn);
+      card.appendChild(gamesWrap);card.appendChild(activeLbl);card.appendChild(btnRow);
+    } else {
+      const row=div({style:{display:"flex",alignItems:"center",gap:"12px"}});
+      const badge=div({style:{width:"44px",height:"44px",borderRadius:"11px",background:pc(p.pos)+"18",border:"2px solid "+pc(p.pos)+"45",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"11px",fontWeight:800,color:pc(p.pos),flexShrink:0}},p.pos);
+      const info=div({style:{flex:1,minWidth:0}});
+      const nameLine=div({style:{display:"flex",alignItems:"center",gap:"7px",marginBottom:"5px",flexWrap:"wrap"}});
+      nameLine.appendChild(span({style:{fontWeight:700,fontSize:"17px"}},p.name));
+      if(!p.active)nameLine.appendChild(span({style:{fontSize:"10px",background:"rgba(255,255,255,0.1)",color:"#888",padding:"2px 8px",borderRadius:"20px"}},"INACTIVE"));
+      info.appendChild(nameLine);
+      if(S.isGaffer)info.appendChild(skillDots(p.skill));
+      info.appendChild(div({style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"5px"}},"🎮 "+p.games+" game"+(p.games!==1?"s":"")));
+
+      row.appendChild(badge);row.appendChild(info);
+
+      if(S.isGaffer){
+        const btns=div({style:{display:"flex",flexDirection:"column",gap:"6px",flexShrink:0}});
+        btns.appendChild(B("Edit",()=>set$1({editId:p.id,editF:{...p}}),{ghost:true,sm:true}));
+        if(S.confirmId===p.id){
+          const cr=div({style:{display:"flex",gap:"5px"}});
+          cr.appendChild(B("Yes",()=>removePlayer(p.id),{bg:RED,fg:"#fff",sm:true}));
+          cr.appendChild(B("No",()=>set$1({confirmId:null}),{ghost:true,sm:true}));
+          btns.appendChild(cr);
+        } else {
+          btns.appendChild(B("Remove",()=>set$1({confirmId:p.id}),{danger:true,sm:true}));
+        }
+        row.appendChild(btns);
+      }
+      card.appendChild(row);
+    }
+    wrap.appendChild(card);
+  });
+  return wrap;
+}
+
+// ── Availability ──────────────────────────────────────────────────────────────
+function buildAvail(){
+  const wrap=div({});
+  const hdr=div({style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}});
+  hdr.appendChild(div({style:{fontSize:"20px",fontWeight:800}},"Who's In?"));
+  hdr.appendChild(B("Reset",resetAvail,{ghost:true,sm:true}));
+  wrap.appendChild(hdr);
+
+  // Poll section (gaffer only)
+  if(S.isGaffer){
+    if(!S.activePoll){
+      const box=div({style:{background:"rgba(0,230,118,0.06)",border:"1px solid rgba(0,230,118,0.2)",borderRadius:"16px",padding:"20px",marginBottom:"20px"}});
+      box.appendChild(div({style:{fontSize:"16px",fontWeight:800,marginBottom:"6px"}},"📲 Live Poll"));
+      box.appendChild(div({style:{fontSize:"14px",color:"rgba(255,255,255,0.5)",marginBottom:"16px",lineHeight:1.5}},"Create a poll link and send it to your WhatsApp group. Players tap IN or OUT — results appear here live."));
+      const cb=B("🚀 Create This Week's Poll",createPoll,{bg:"#00e676",fg:"#000"});
+      cb.style.width="100%";cb.style.padding="12px";cb.style.fontSize="15px";
+      box.appendChild(cb);
+      wrap.appendChild(box);
+    } else {
+      const pollInC=Object.values(S.pollVotes).filter(v=>v==="in").length;
+      const pollOutC=Object.values(S.pollVotes).filter(v=>v==="out").length;
+      const box=div({style:{background:"rgba(0,230,118,0.06)",border:"1px solid rgba(0,230,118,0.25)",borderRadius:"16px",padding:"20px",marginBottom:"20px"}});
+      const topRow=div({style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}});
+      const leftSide=div({});
+      const liveLine=div({style:{display:"flex",alignItems:"center",gap:"8px"}});
+      const dot=div({style:{width:"8px",height:"8px",borderRadius:"50%",background:"#00e676"}});
+      dot.className="pulse";
+      liveLine.appendChild(dot);liveLine.appendChild(span({style:{fontSize:"15px",fontWeight:800}},"Poll Live"));
+      leftSide.appendChild(liveLine);
+      leftSide.appendChild(div({style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"2px"}},S.activePoll.date));
+      const counts=div({style:{display:"flex",gap:"14px",textAlign:"center"}});
+      [[pollInC,"IN","#22c55e"],[pollOutC,"OUT",RED],[active().length-pollInC-pollOutC,"PENDING","rgba(255,255,255,0.3)"]].forEach(([v,l,c])=>{
+        counts.appendChild(div({},[div({style:{fontSize:"24px",fontWeight:900,color:c,lineHeight:1}},String(v)),div({style:{fontSize:"9px",color:"rgba(255,255,255,0.4)",letterSpacing:"1px"}},l)]));
+      });
+      topRow.appendChild(leftSide);topRow.appendChild(counts);box.appendChild(topRow);
+
+      const link=location.origin+location.pathname+"?poll="+S.activePoll.id;
+      const linkRow=div({style:{background:"rgba(0,0,0,0.3)",borderRadius:"10px",padding:"10px 14px",marginBottom:"12px",display:"flex",alignItems:"center",gap:"10px"}});
+      linkRow.appendChild(div({style:{flex:1,fontSize:"12px",color:"rgba(255,255,255,0.5)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},link));
+      const cpBtn=B(S.pollCopied?"✓ Copied!":"Copy Link",copyLink,{ghost:true,sm:true});
+      if(S.pollCopied)cpBtn.style.background="#22c55e",cpBtn.style.color="#000";
+      linkRow.appendChild(cpBtn);box.appendChild(linkRow);
+
+      const btnRow=div({style:{display:"flex",gap:"8px",marginBottom:"12px"}});
+      const waA=h("a",{href:waPoll(),target:"_blank",rel:"noopener noreferrer",style:{flex:1,background:"#25D366",color:"#fff",borderRadius:"9px",padding:"11px",fontWeight:800,fontSize:"14px",fontFamily:"inherit",textDecoration:"none",textAlign:"center",display:"block"}},"📲 Send to WhatsApp");
+      btnRow.appendChild(waA);
+      btnRow.appendChild(B("Close & Import",closePoll,{ghost:true,sm:false}));
+      box.appendChild(btnRow);
+
+      // Live responses
+      const voted=active().filter(p=>S.pollVotes[p.id]);
+      if(voted.length>0){
+        const respDiv=div({style:{borderTop:"1px solid rgba(255,255,255,0.08)",paddingTop:"12px"}});
+        respDiv.appendChild(div({style:{fontSize:"10px",letterSpacing:"2px",color:"rgba(255,255,255,0.4)",marginBottom:"8px"}},"LIVE RESPONSES"));
+        const chips=div({style:{display:"flex",flexWrap:"wrap",gap:"6px"}});
+        voted.forEach(p=>{
+          const isin=S.pollVotes[p.id]==="in";
+          chips.appendChild(span({style:{background:isin?"rgba(34,197,94,0.15)":"rgba(239,68,68,0.15)",color:isin?"#22c55e":RED,border:"1px solid "+(isin?"rgba(34,197,94,0.3)":"rgba(239,68,68,0.3)"),padding:"4px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:700}},(isin?"✅ ":"❌ ")+p.name));
+        });
+        respDiv.appendChild(chips);box.appendChild(respDiv);
+      }
+      wrap.appendChild(box);
+    }
+  }
+
+  // Manual section
+  wrap.appendChild(div({style:{fontSize:"10px",letterSpacing:"2px",color:"rgba(255,255,255,0.3)",marginBottom:"10px"}},S.isGaffer?"OR UPDATE MANUALLY":"WHO'S IN THIS WEEK"));
+  const grid=div({style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px",marginBottom:"16px"}});
+  [{l:"IN",c:"#22c55e",n:inP().length},{l:"OUT",c:RED,n:outP().length},{l:"UNKNOWN",c:"rgba(255,255,255,0.3)",n:unknownP().length}].forEach(x=>{
+    grid.appendChild(div({style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"12px",padding:"12px 0",textAlign:"center"}},[
+      div({style:{fontSize:"22px",fontWeight:800,color:x.c}},String(x.n)),
+      div({style:{fontSize:"10px",color:"rgba(255,255,255,0.4)",letterSpacing:"1px"}},x.l),
+    ]));
+  });
+  wrap.appendChild(grid);
+
+  if(S.isGaffer){
+    const btnRow=div({style:{display:"flex",gap:"8px",marginBottom:"14px"}});
+    btnRow.appendChild(B("✓ All In",()=>{const o={};active().forEach(p=>o[p.id]="in");saveAvail(o);},{bg:"rgba(34,197,94,0.15)",fg:"#22c55e",sm:true}));
+    btnRow.appendChild(B("Clear",()=>{saveAvail({});if(S.activePoll){S.pollVotes={};DB.set("shared/votes_"+S.activePoll.id,{});}render();},{ghost:true,sm:true}));
+    wrap.appendChild(btnRow);
+  }
+
+  active().forEach(p=>{
+    const s=S.avail[p.id];
+    const row=div({style:{display:"flex",alignItems:"center",gap:"12px",padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.07)"}});
+    row.appendChild(div({style:{width:"36px",height:"36px",borderRadius:"9px",background:pc(p.pos)+"18",border:"2px solid "+pc(p.pos)+"40",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:800,color:pc(p.pos),flexShrink:0}},p.pos));
+    row.appendChild(div({style:{flex:1,fontWeight:700}},p.name));
+    if(S.isGaffer){
+      const ab=div({style:{display:"flex",gap:"6px"}});
+      [["in","IN","#22c55e"],["out","OUT",RED]].forEach(([val,lbl,col])=>{
+        const b=btn({onclick:()=>toggleAvail(p.id,val),style:{background:s===val?col:col+"18",color:s===val?(val==="out"?"#fff":"#000"):col,border:"none",borderRadius:"8px",padding:"7px 14px",fontFamily:"inherit",fontSize:"13px",fontWeight:700,cursor:"pointer",minWidth:"50px"}},lbl);
+        ab.appendChild(b);
+      });
+      row.appendChild(ab);
+    } else {
+      row.appendChild(span({style:{fontSize:"13px",fontWeight:700,color:s==="in"?"#22c55e":s==="out"?RED:"rgba(255,255,255,0.3)"}},s==="in"?"✅ In":s==="out"?"❌ Out":"—"));
+    }
+    wrap.appendChild(row);
+  });
+
+  if(inP().length>0){
+    const box=div({style:{marginTop:"20px",background:"rgba(34,197,94,0.07)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"13px",padding:"16px"}});
+    box.appendChild(div({style:{fontSize:"10px",letterSpacing:"2px",color:"#22c55e",marginBottom:"8px"}},"📋 CONFIRMED IN"));
+    const chips=div({style:{display:"flex",flexWrap:"wrap",gap:"6px"}});
+    inP().forEach(p=>chips.appendChild(span({style:{background:"rgba(34,197,94,0.15)",color:"#22c55e",border:"1px solid rgba(34,197,94,0.3)",padding:"4px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:700}},p.name)));
+    box.appendChild(chips);wrap.appendChild(box);
+  }
+  return wrap;
+}
+
+// ── Payments ──────────────────────────────────────────────────────────────────
+function buildPayments(){
+  const wrap=div({});
+  const hdr=div({style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}});
+  hdr.appendChild(div({style:{fontSize:"20px",fontWeight:800}},"Payments"));
+  if(S.isGaffer)hdr.appendChild(B(S.paySettings?"Hide Settings":"⚙️ Settings",()=>set$1({paySettings:!S.paySettings}),{ghost:true,sm:true}));
+  wrap.appendChild(hdr);
+
+  if(S.isGaffer&&S.paySettings){
+    const box=div({style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"13px",padding:"16px",marginBottom:"16px"}});
+    box.appendChild(div({style:{fontSize:"11px",letterSpacing:"2px",color:"rgba(255,255,255,0.4)",marginBottom:"12px"}},"PAYMENT SETTINGS"));
+    const row=div({style:{display:"flex",gap:"12px"}});
+    const pc1=div({style:{flex:1}});pc1.appendChild(div({style:{fontSize:"11px",color:"#888",marginBottom:"5px"}},"PITCH COST (£)"));
+    const pci=iBox("number",S.pitchCost,v=>{S.pitchCost=+v;save("pitchcost",S.pitchCost);});pc1.appendChild(pci);
+    const pc2=div({style:{flex:1}});pc2.appendChild(div({style:{fontSize:"11px",color:"#888",marginBottom:"5px"}},"PLAYER COST (£)"));
+    const pcj=iBox("number",S.playerCost,v=>{S.playerCost=+v;save("playercost",S.playerCost);});pc2.appendChild(pcj);
+    row.appendChild(pc1);row.appendChild(pc2);box.appendChild(row);wrap.appendChild(box);
+  }
+
+  // Float
+  const floatBox=div({style:{background:S.float>=0?"rgba(34,197,94,0.08)":"rgba(239,68,68,0.08)",border:"1px solid "+(S.float>=0?"rgba(34,197,94,0.25)":"rgba(239,68,68,0.25)"),borderRadius:"14px",padding:"16px",marginBottom:"16px",display:"flex",justifyContent:"space-between",alignItems:"center"}});
+  floatBox.appendChild(div({},[div({style:{fontSize:"11px",letterSpacing:"2px",color:"rgba(255,255,255,0.4)"}},"FLOAT BALANCE"),div({style:{fontSize:"32px",fontWeight:900,color:S.float>=0?"#22c55e":RED}},"£"+S.float.toFixed(2))]));
+  floatBox.appendChild(div({style:{textAlign:"right",fontSize:"12px",color:"rgba(255,255,255,0.4)"}},"Pitch: £"+S.pitchCost+"\nPer player: £"+S.playerCost));
+  wrap.appendChild(floatBox);
+
+  // This week
+  const pp=payingPlayers();
+  const paidC=pp.filter(p=>p.paid).length;
+  const week=div({style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"13px",padding:"14px",marginBottom:"16px"}});
+  week.appendChild(div({style:{fontSize:"11px",letterSpacing:"2px",color:"rgba(255,255,255,0.4)",marginBottom:"10px"}},S.teams?"THIS WEEK — from teams":"THIS WEEK — set availability & pick teams first"));
+  const wGrid=div({style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px",marginBottom:"10px"}});
+  [{l:"PLAYING",v:pp.length,c:"#fff"},{l:"PAID",v:paidC,c:"#22c55e"},{l:"UNPAID",v:pp.length-paidC,c:RED}].forEach(x=>{
+    wGrid.appendChild(div({style:{textAlign:"center"}},[div({style:{fontSize:"22px",fontWeight:800,color:x.c}},String(x.v)),div({style:{fontSize:"10px",color:"rgba(255,255,255,0.4)",letterSpacing:"1px"}},x.l)]));
+  });
+  week.appendChild(wGrid);
+
+  const bar=div({style:{background:"rgba(255,255,255,0.08)",borderRadius:"8px",height:"8px",marginBottom:"10px",overflow:"hidden"}});
+  const fill=div({style:{height:"100%",width:(pp.length?(paidC/pp.length)*100:0)+"%",background:"linear-gradient(90deg,#22c55e,#00bcd4)",borderRadius:"8px"}});
+  bar.appendChild(fill);week.appendChild(bar);
+
+  if(S.isGaffer){
+    const wp=weekProfit();
+    week.appendChild(div({style:{display:"flex",justifyContent:"space-between",fontSize:"13px",marginBottom:"10px"}},[
+      span({},"Income: £"+weekIncome()),
+      span({},"Cost: £"+S.pitchCost),
+      span({style:{color:wp>=0?"#22c55e":RED}},(wp>=0?"Surplus":"Deficit")+": £"+Math.abs(wp)),
+    ]));
+    const br=div({style:{display:"flex",gap:"8px"}});
+    br.appendChild(B("✓ All Paid",()=>savePlayers(S.players.map(p=>pp.find(q=>q.id===p.id)?{...p,paid:true}:p)),{bg:"rgba(34,197,94,0.15)",fg:"#22c55e",sm:true}));
+    br.appendChild(B("Reset",()=>savePlayers(S.players.map(p=>({...p,paid:false}))),{ghost:true,sm:true}));
+    const cw=B("🔒 Close Week",closeWeek,{bg:"#00e676",fg:"#000",sm:true});
+    cw.style.marginLeft="auto";
+    br.appendChild(cw);week.appendChild(br);
+  }
+  wrap.appendChild(week);
+
+  // Player rows
+  pp.forEach(p=>{
+    const row=div({style:{display:"flex",alignItems:"center",gap:"12px",padding:"11px 0",borderBottom:"1px solid rgba(255,255,255,0.07)"}});
+    row.appendChild(div({style:{width:"34px",height:"34px",borderRadius:"9px",background:pc(p.pos)+"18",border:"2px solid "+pc(p.pos)+"40",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:800,color:pc(p.pos),flexShrink:0}},p.pos));
+    row.appendChild(div({style:{flex:1}},p.name));
+    if(S.isGaffer){
+      const pb=btn({onclick:()=>togglePaid(p.id),style:{background:p.paid?"#22c55e":"rgba(255,255,255,0.08)",color:p.paid?"#000":"#888",border:"none",borderRadius:"8px",padding:"8px 18px",fontWeight:700,cursor:"pointer",fontSize:"13px",fontFamily:"inherit",minWidth:"82px"}},p.paid?"✓ PAID":"UNPAID");
+      row.appendChild(pb);
+    } else {
+      row.appendChild(span({style:{fontSize:"13px",fontWeight:700,color:p.paid?"#22c55e":"rgba(255,255,255,0.3)"}},p.paid?"✅ Paid":"Pending"));
+    }
+    wrap.appendChild(row);
+  });
+
+  // History
+  if(S.payHistory.length>0){
+    wrap.appendChild(sLabel("📋 Payment History"));
+    S.payHistory.forEach(h=>{
+      const hCard=div({style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"13px",padding:"14px",marginBottom:"10px"}});
+      const hTop=div({style:{display:"flex",justifyContent:"space-between",marginBottom:"8px"}});
+      hTop.appendChild(div({style:{fontWeight:800,fontSize:"16px"}},h.label));
+      if(S.isGaffer)hTop.appendChild(span({style:{fontSize:"13px",fontWeight:800,color:h.profit>=0?"#22c55e":RED}},(h.profit>=0?"+":"")+"£"+h.profit));
+      hCard.appendChild(hTop);
+      if(S.isGaffer)hCard.appendChild(div({style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"8px"}},"£"+h.income+" collected · £"+h.cost+" pitch · Float: £"+h.float.toFixed(2)));
+      if(h.paid.length>0){
+        const pd=div({style:{marginBottom:"6px"}});
+        pd.appendChild(div({style:{fontSize:"10px",color:"#22c55e",letterSpacing:"1px",marginBottom:"4px"}},"✅ PAID"));
+        const chips=div({style:{display:"flex",flexWrap:"wrap",gap:"5px"}});
+        h.paid.forEach(n=>chips.appendChild(span({style:{background:"rgba(34,197,94,0.15)",color:"#22c55e",border:"1px solid rgba(34,197,94,0.3)",padding:"2px 9px",borderRadius:"20px",fontSize:"12px",fontWeight:600}},n)));
+        pd.appendChild(chips);hCard.appendChild(pd);
+      }
+      if(h.unpaid.length>0){
+        const ud=div({});
+        ud.appendChild(div({style:{fontSize:"10px",color:RED,letterSpacing:"1px",marginBottom:"4px"}},"❌ MISSED"));
+        const chips=div({style:{display:"flex",flexWrap:"wrap",gap:"5px"}});
+        h.unpaid.forEach(n=>chips.appendChild(span({style:{background:"rgba(239,68,68,0.15)",color:RED,border:"1px solid rgba(239,68,68,0.3)",padding:"2px 9px",borderRadius:"20px",fontSize:"12px",fontWeight:600}},n)));
+        ud.appendChild(chips);hCard.appendChild(ud);
+      }
+      wrap.appendChild(hCard);
+    });
+  }
+  return wrap;
+}
+
+// ── Teams ─────────────────────────────────────────────────────────────────────
+function buildTeams(){
+  const wrap=div({});
+  wrap.appendChild(div({style:{fontSize:"20px",fontWeight:800,marginBottom:"6px"}},"Team Picker"));
+  wrap.appendChild(div({style:{fontSize:"13px",color:inP().length>=2?"#22c55e":"rgba(255,255,255,0.4)",marginBottom:"14px"}},inP().length>=2?"Using "+inP().length+" confirmed players ✅":"Using all "+active().length+" active players"));
+
+  // GK pins notice
+  const poolPlayers=pool();
+  const bash=poolPlayers.find(p=>p.name.toLowerCase().startsWith("bash")&&p.pos==="GK");
+  const mike=poolPlayers.find(p=>p.name.toLowerCase().startsWith("mike")&&p.pos==="GK");
+  if(bash||mike){
+    const pin=div({style:{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.2)",borderRadius:"10px",padding:"9px 14px",marginBottom:"14px",fontSize:"13px",color:"#f59e0b"}});
+    pin.textContent="📌 GK pins — "+(bash?bash.name:"")+" → Team Red · "+(mike?mike.name:"")+" → Team Blue";
+    wrap.appendChild(pin);
+  }
+
+  if(S.isGaffer){
+    const br=div({style:{display:"flex",gap:"10px",marginBottom:"14px",flexWrap:"wrap"}});
+    br.appendChild(B("🎲 Random",genRandom,{bg:RED,fg:"#fff"}));
+    br.appendChild(B("⚖️ Balanced",genBalance,{bg:BLUE,fg:"#fff"}));
+    if(S.teams){
+      br.appendChild(B("Clear",()=>set$1({teams:null}),{ghost:true}));
+      const wa=h("a",{href:waTeams(),target:"_blank",rel:"noopener noreferrer",style:{background:"#25D366",color:"#fff",borderRadius:"8px",padding:"9px 18px",fontWeight:700,fontSize:"13px",fontFamily:"inherit",textDecoration:"none",display:"inline-flex",alignItems:"center"}},"📲 Share Teams");
+      br.appendChild(wa);
+    }
+    wrap.appendChild(br);
+    if(S.teams)wrap.appendChild(div({style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginBottom:"14px",padding:"8px 14px",background:"rgba(255,255,255,0.04)",borderRadius:"9px"}},"💡 Tap ⇄ on any player to move them to the other team"));
+  }
+
+  if(!S.teams){
+    const empty=div({style:{textAlign:"center",padding:"60px 0",color:"rgba(255,255,255,0.2)"}});
+    empty.appendChild(div({style:{fontSize:"50px"}},"⚽"));
+    empty.appendChild(div({style:{marginTop:"12px"}},S.isGaffer?"Pick a generation method":"Waiting for teams to be picked..."));
+    wrap.appendChild(empty);return wrap;
+  }
+
+  const teamsRow=div({style:{display:"flex",gap:"12px",flexWrap:"wrap"}});
+  [[0,RED,"TEAM RED"],[1,BLUE,"TEAM BLUE"]].forEach(([ti,tColor,tName])=>{
+    const team=S.teams[ti];
+    const avgV=team.length?(team.reduce((s,p)=>s+p.skill,0)/team.length).toFixed(1):"–";
+    const card=div({style:{flex:"1 1 280px",background:"rgba(255,255,255,0.04)",border:"2px solid "+tColor+"55",borderRadius:"13px",padding:"16px",marginBottom:"12px"}});
+    const th=div({style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"13px"}});
+    th.appendChild(div({style:{display:"flex",alignItems:"center",gap:"10px"}},[
+      div({style:{width:"18px",height:"18px",borderRadius:"4px",background:tColor,flexShrink:0}}),
+      div({style:{fontSize:"19px",fontWeight:800,color:tColor}},tName),
+    ]));
+    th.appendChild(div({style:{fontSize:"12px",color:"rgba(255,255,255,0.4)"}},"Avg ★"+avgV));
+    card.appendChild(th);
+
+    team.forEach(p=>{
+      const row=div({style:{display:"flex",alignItems:"center",gap:"9px",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+      row.appendChild(div({style:{width:"28px",height:"28px",borderRadius:"7px",background:pc(p.pos)+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9px",fontWeight:800,color:pc(p.pos)}},p.pos));
+      row.appendChild(span({style:{flex:1,fontWeight:700,fontSize:"15px"}},p.name));
+      if(p.pos==="GK")row.appendChild(span({style:{fontSize:"10px",background:tColor+"22",color:tColor,border:"1px solid "+tColor+"44",padding:"2px 7px",borderRadius:"10px",fontWeight:700}},"GK"));
+      if(S.isGaffer){
+        const swp=btn({onclick:()=>swapPlayer(p.id,ti),style:{background:"rgba(255,255,255,0.1)",color:"#fff",border:"none",borderRadius:"6px",padding:"4px 8px",cursor:"pointer",fontFamily:"inherit",fontSize:"13px",fontWeight:700}},"⇄");
+        row.appendChild(swp);
+      }
+      card.appendChild(row);
+    });
+
+    card.appendChild(div({style:{marginTop:"11px",padding:"8px 11px",background:tColor+"10",borderRadius:"8px",fontSize:"11px",color:"rgba(255,255,255,0.35)"}},team.length+" players"));
+    teamsRow.appendChild(card);
+  });
+  wrap.appendChild(teamsRow);
+  return wrap;
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+function buildHistory(){
+  const wrap=div({});
+  const hdr=div({style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"18px"}});
+  hdr.appendChild(div({style:{fontSize:"20px",fontWeight:800}},"Session History"));
+  if(S.isGaffer)hdr.appendChild(B("+ Log Session",()=>{S.sf={date:nextWed(),result:"",notes:"",ids:inP().length>0?inP().map(p=>p.id):[]};set$1({sessionOpen:true});},{bg:"#00e676",fg:"#000"}));
+  wrap.appendChild(hdr);
+  if(S.sessions.length===0){const e=div({style:{textAlign:"center",padding:"60px 0",color:"rgba(255,255,255,0.2)"}});e.appendChild(div({style:{fontSize:"50px"}},"📋"));e.appendChild(div({style:{marginTop:"12px"}},"No sessions yet"));wrap.appendChild(e);return wrap;}
+  S.sessions.forEach(s=>{
+    const played=S.players.filter(p=>s.playerIds&&s.playerIds.includes(p.id));
+    const card=div({style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"13px",padding:"16px",marginBottom:"10px"}});
+    const top=div({style:{display:"flex",justifyContent:"space-between",marginBottom:"8px"}});
+    const d=new Date(s.date+"T12:00:00");
+    top.appendChild(div({style:{fontWeight:800,fontSize:"17px"}},d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"long",year:"numeric"})));
+    top.appendChild(span({style:{fontSize:"11px",background:"rgba(59,130,246,0.15)",color:BLUE,padding:"2px 9px",borderRadius:"20px",fontWeight:700}},s.count+" players"));
+    card.appendChild(top);
+    if(s.result)card.appendChild(div({style:{fontSize:"14px",color:"#f59e0b",fontWeight:700,marginBottom:"8px"}},"📊 "+s.result));
+    if(played.length>0){const chips=div({style:{display:"flex",flexWrap:"wrap",gap:"5px",marginBottom:s.notes?"8px":"0"}});played.forEach(p=>chips.appendChild(span({style:{background:pc(p.pos)+"18",color:pc(p.pos),border:"1px solid "+pc(p.pos)+"35",padding:"2px 9px",borderRadius:"20px",fontSize:"12px",fontWeight:600}},p.name)));card.appendChild(chips);}
+    if(s.notes)card.appendChild(div({style:{fontSize:"13px",color:"rgba(255,255,255,0.45)",fontStyle:"italic"}},'"'+s.notes+'"'));
+    wrap.appendChild(card);
+  });
+  return wrap;
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function buildStats(){
+  const wrap=div({});
+  wrap.appendChild(div({style:{fontSize:"20px",fontWeight:800,marginBottom:"18px"}},"Squad Stats"));
+  const grid=div({style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px",marginBottom:"4px"}});
+  [{l:"APPEARANCES",v:S.players.reduce((s,p)=>s+p.games,0),c:BLUE},{l:"SESSIONS",v:S.sessions.length,c:"#22c55e"},{l:"FLOAT",v:"£"+S.float.toFixed(0),c:S.float>=0?"#22c55e":RED}].forEach(x=>{
+    grid.appendChild(div({style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"12px",padding:"13px 0",textAlign:"center"}},[div({style:{fontSize:"22px",fontWeight:800,color:x.c}},String(x.v)),div({style:{fontSize:"9px",color:"rgba(255,255,255,0.4)",letterSpacing:"1px",padding:"0 4px"}},x.l)]));
+  });
+  wrap.appendChild(grid);
+
+  wrap.appendChild(sLabel("🏆 Most Appearances"));
+  const sorted=[...S.players].sort((a,b)=>b.games-a.games);
+  const maxG=sorted.length?sorted[0].games:1;
+  sorted.forEach((p,i)=>{
+    const row=div({style:{display:"flex",alignItems:"center",gap:"11px",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+    row.appendChild(div({style:{width:"24px",fontWeight:800,fontSize:"15px",color:["#f59e0b","#94a3b8","#cd7c4a"][i]||"rgba(255,255,255,0.2)"}},"#"+(i+1)));
+    row.appendChild(div({style:{width:"30px",height:"30px",borderRadius:"7px",background:pc(p.pos)+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9px",fontWeight:800,color:pc(p.pos)}},p.pos));
+    row.appendChild(div({style:{flex:1,fontWeight:700}},p.name));
+    const barWrap=div({style:{display:"flex",alignItems:"center",gap:"6px"}});
+    const barBg=div({style:{width:"70px",height:"5px",background:"rgba(255,255,255,0.08)",borderRadius:"3px",overflow:"hidden"}});
+    barBg.appendChild(div({style:{height:"100%",width:Math.max(2,p.games/maxG)*100+"%",background:BLUE,borderRadius:"3px"}}));
+    barWrap.appendChild(barBg);barWrap.appendChild(span({style:{fontWeight:800,color:BLUE,minWidth:"24px",textAlign:"right"}},String(p.games)));
+    row.appendChild(barWrap);wrap.appendChild(row);
+  });
+
+  if(S.isGaffer){
+    wrap.appendChild(sLabel("⭐ Skill Rankings"));
+    [...S.players].sort((a,b)=>b.skill-a.skill).forEach((p,i)=>{
+      const row=div({style:{display:"flex",alignItems:"center",gap:"11px",padding:"9px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+      row.appendChild(div({style:{width:"24px",fontWeight:800,fontSize:"15px",color:["#f59e0b","#94a3b8","#cd7c4a"][i]||"rgba(255,255,255,0.2)"}},"#"+(i+1)));
+      row.appendChild(div({style:{width:"30px",height:"30px",borderRadius:"7px",background:pc(p.pos)+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"9px",fontWeight:800,color:pc(p.pos)}},p.pos));
+      const info=div({style:{flex:1}});info.appendChild(div({style:{fontWeight:700,marginBottom:"4px"}},p.name));info.appendChild(skillDots(p.skill));
+      row.appendChild(info);row.appendChild(span({style:{fontSize:"17px",fontWeight:800,color:"#f59e0b"}},String(p.skill)));
+      wrap.appendChild(row);
+    });
+  }
+
+  wrap.appendChild(sLabel("🏟️ Position Breakdown"));
+  const posGrid=div({style:{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"8px",marginBottom:"20px"}});
+  ["GK","DEF","MID","FWD","ANY"].forEach(pos=>{
+    const n=S.players.filter(p=>p.pos===pos).length;
+    posGrid.appendChild(div({style:{background:pc(pos)+"10",border:"1px solid "+pc(pos)+"30",borderRadius:"11px",padding:"11px 0",textAlign:"center"}},[div({style:{fontSize:"20px",fontWeight:800,color:pc(pos)}},String(n)),div({style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},pos)]));
+  });
+  wrap.appendChild(posGrid);
+
+  if(S.sessions.length>0){
+    const counts={};S.sessions.forEach(s=>{const m=s.date&&s.date.slice(0,7);if(m)counts[m]=(counts[m]||0)+1;});
+    const mx=Math.max(...Object.values(counts));
+    wrap.appendChild(sLabel("📅 Sessions Per Month"));
+    Object.entries(counts).sort().forEach(([m,n])=>{
+      const row=div({style:{display:"flex",alignItems:"center",gap:"11px",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+      row.appendChild(div({style:{width:"80px",fontSize:"12px",color:"rgba(255,255,255,0.45)"}},new Date(m+"-15").toLocaleDateString("en-GB",{month:"short",year:"numeric"})));
+      const bar=div({style:{flex:1,height:"7px",background:"rgba(255,255,255,0.08)",borderRadius:"4px",overflow:"hidden"}});
+      bar.appendChild(div({style:{height:"100%",width:(n/mx)*100+"%",background:"#22c55e",borderRadius:"4px"}}));
+      row.appendChild(bar);row.appendChild(div({style:{fontWeight:800,color:"#22c55e",minWidth:"18px"}},String(n)));
+      wrap.appendChild(row);
+    });
+  }
+  return wrap;
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+function buildPinModal(){
+  const bg=div({class:"mbg"});
+  bg.addEventListener("click",()=>set$1({pinOpen:false,pinVal:"",pinError:false}));
+  const box=div({class:"mbox",style:{width:"280px",textAlign:"center"}});
+  box.addEventListener("click",e=>e.stopPropagation());
+  box.appendChild(div({style:{fontSize:"32px",marginBottom:"8px"}},"🔐"));
+  box.appendChild(div({style:{fontSize:"20px",fontWeight:800,marginBottom:"4px"}},"Gaffer Login"));
+  box.appendChild(div({style:{fontSize:"13px",color:"rgba(255,255,255,0.4)",marginBottom:"20px"}},"Enter your 4-digit PIN"));
+  const inp2=iBox("password",S.pinVal,v=>S.pinVal=v,"••••",{textAlign:"center",fontSize:"28px",letterSpacing:"8px",marginBottom:"12px"});
+  inp2.setAttribute("inputmode","numeric");inp2.setAttribute("maxlength","4");
+  inp2.addEventListener("keydown",e=>{if(e.key==="Enter")login();});
+  box.appendChild(inp2);
+  if(S.pinError)box.appendChild(div({style:{color:RED,fontSize:"13px",marginBottom:"10px",fontWeight:700}},"❌ Incorrect PIN"));
+  const br=div({style:{display:"flex",gap:"8px"}});
+  br.appendChild(B("Unlock",login,{bg:"#00e676",fg:"#000",sm:false}));
+  const cl=B("Cancel",()=>set$1({pinOpen:false,pinVal:"",pinError:false}),{ghost:true});
+  br.appendChild(cl);box.appendChild(br);bg.appendChild(box);
+  setTimeout(()=>inp2.focus(),50);
+  return bg;
+}
+
+function buildAddModal(){
+  const bg=div({class:"mbg"});
+  bg.addEventListener("click",()=>set$1({addOpen:false}));
+  const box=div({class:"mbox"});
+  box.addEventListener("click",e=>e.stopPropagation());
+  box.appendChild(div({style:{fontSize:"19px",fontWeight:800,marginBottom:"18px"}},"Add New Player"));
+  const nameIn=iBox("text",S.newP.name,v=>S.newP.name=v,"Full name *");nameIn.style.marginBottom="10px";box.appendChild(nameIn);
+  const posIn=selBox(["GK","DEF","MID","FWD","ANY"],S.newP.pos,v=>S.newP.pos=v);posIn.style.width="100%";posIn.style.marginBottom="10px";box.appendChild(posIn);
+  const skillLbl=div({style:{fontSize:"11px",color:"#888",marginBottom:"5px"}},"SKILL: "+S.newP.skill+"/10");box.appendChild(skillLbl);
+  const skillIn=inp({type:"range",min:1,max:10,style:{width:"100%",marginBottom:"10px",accentColor:"#00e676"}});
+  skillIn.value=S.newP.skill;
+  skillIn.addEventListener("input",e=>{S.newP.skill=+e.target.value;skillLbl.textContent="SKILL: "+S.newP.skill+"/10";});
+  box.appendChild(skillIn);
+  const gamesIn=iBox("number",S.newP.games,v=>S.newP.games=+v||0,"Games already played (0)");gamesIn.style.marginBottom="12px";box.appendChild(gamesIn);
+  const br=div({style:{display:"flex",gap:"8px"}});
+  const ab=B("Add to Squad",addPlayer,{bg:"#00e676",fg:"#000"});ab.style.flex="1";br.appendChild(ab);
+  br.appendChild(B("Cancel",()=>set$1({addOpen:false}),{ghost:true}));
+  box.appendChild(br);bg.appendChild(box);
+  return bg;
+}
+
+function buildSessionModal(){
+  const bg=div({class:"mbg"});
+  bg.addEventListener("click",()=>set$1({sessionOpen:false}));
+  const box=div({class:"mbox"});
+  box.addEventListener("click",e=>e.stopPropagation());
+  box.appendChild(div({style:{fontSize:"19px",fontWeight:800,marginBottom:"18px"}},"Log Session"));
+
+  box.appendChild(div({style:{fontSize:"10px",color:"#888",letterSpacing:"1px",marginBottom:"5px"}},"DATE"));
+  const dateIn=iBox("date",S.sf.date,v=>S.sf.date=v);dateIn.style.marginBottom="10px";box.appendChild(dateIn);
+
+  box.appendChild(div({style:{fontSize:"10px",color:"#888",letterSpacing:"1px",marginBottom:"5px"}},"RESULT (optional)"));
+  const resIn=iBox("text",S.sf.result,v=>S.sf.result=v,"e.g. 7-5 or leave blank");resIn.style.marginBottom="10px";box.appendChild(resIn);
+
+  const whoLbl=div({style:{fontSize:"10px",color:"#888",letterSpacing:"1px",marginBottom:"8px"}});
+  whoLbl.textContent="WHO PLAYED? ("+S.sf.ids.length+" selected)";box.appendChild(whoLbl);
+  const selBr=div({style:{display:"flex",gap:"7px",marginBottom:"8px"}});
+  selBr.appendChild(B("All",()=>{S.sf.ids=active().map(p=>p.id);whoLbl.textContent="WHO PLAYED? ("+S.sf.ids.length+" selected)";renderCheckboxes();},{bg:"rgba(34,197,94,0.15)",fg:"#22c55e",sm:true}));
+  selBr.appendChild(B("Clear",()=>{S.sf.ids=[];whoLbl.textContent="WHO PLAYED? (0 selected)";renderCheckboxes();},{ghost:true,sm:true}));
+  box.appendChild(selBr);
+
+  const cbList=div({style:{maxHeight:"180px",overflowY:"auto",display:"flex",flexDirection:"column",gap:"5px",marginBottom:"10px"}});
+  function renderCheckboxes(){
+    cbList.innerHTML="";
+    active().forEach(p=>{
+      const lbl=h("label",{style:{display:"flex",alignItems:"center",gap:"9px",cursor:"pointer",padding:"6px 8px",borderRadius:"8px",background:S.sf.ids.includes(p.id)?"rgba(34,197,94,0.1)":"transparent"}});
+      const cb=inp({type:"checkbox"});cb.checked=S.sf.ids.includes(p.id);
+      cb.addEventListener("change",()=>{
+        if(cb.checked)S.sf.ids=[...S.sf.ids,p.id];
+        else S.sf.ids=S.sf.ids.filter(x=>x!==p.id);
+        whoLbl.textContent="WHO PLAYED? ("+S.sf.ids.length+" selected)";
+        lbl.style.background=cb.checked?"rgba(34,197,94,0.1)":"transparent";
+      });
+      lbl.appendChild(cb);lbl.appendChild(span({style:{flex:1,fontWeight:600}},p.name));
+      lbl.appendChild(span({style:{fontSize:"11px",color:pc(p.pos)}},p.pos));
+      cbList.appendChild(lbl);
+    });
+  }
+  renderCheckboxes();box.appendChild(cbList);
+
+  box.appendChild(div({style:{fontSize:"10px",color:"#888",letterSpacing:"1px",marginBottom:"5px"}},"NOTES (optional)"));
+  const notesEl=h("textarea",{placeholder:"Any notes...",style:{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",borderRadius:"8px",padding:"9px 12px",fontSize:"14px",outline:"none",fontFamily:"inherit",width:"100%",resize:"vertical",marginBottom:"10px"}});
+  notesEl.value=S.sf.notes||"";notesEl.addEventListener("input",e=>S.sf.notes=e.target.value);box.appendChild(notesEl);
+
+  box.appendChild(div({style:{fontSize:"12px",color:"rgba(255,255,255,0.3)",background:"rgba(59,130,246,0.07)",border:"1px solid rgba(59,130,246,0.18)",borderRadius:"8px",padding:"8px 11px",marginBottom:"10px"}},"ℹ️ Adds +1 game to each selected player"));
+  const br=div({style:{display:"flex",gap:"8px"}});
+  const sb=B("Save Session",logSession,{bg:"#00e676",fg:"#000"});sb.style.flex="1";br.appendChild(sb);
+  br.appendChild(B("Cancel",()=>set$1({sessionOpen:false}),{ghost:true}));
+  box.appendChild(br);bg.appendChild(box);return bg;
+}
+
+// ── Poll View (for players) ───────────────────────────────────────────────────
+async function renderPoll(pollId){
+  const root=document.getElementById("root");
+  root.innerHTML="<div style='display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:12px'><div style='font-size:44px'>⚽</div><div style='color:#00e676;letter-spacing:3px'>Loading poll...</div></div>";
+
+  const poll=await DB.get("shared/poll_"+pollId,null);
+  const players=await DB.get("private/players",[]);
+  const activePl=(Array.isArray(players)?players:[]).filter(p=>p.active);
+
+  if(!poll){root.innerHTML="<div style='display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;color:#fff;text-align:center;padding:24px'><div style='font-size:52px'>❌</div><div style='font-size:24px;font-weight:800'>Poll not found</div><div style='color:rgba(255,255,255,0.4)'>This poll may have been closed.</div></div>";return;}
+
+  let votes={};
+  function buildPollUI(){
+    const inC=Object.values(votes).filter(v=>v==="in").length;
+    const outC=Object.values(votes).filter(v=>v==="out").length;
+    const wrap=div({style:{minHeight:"100vh",background:"#0a0f1a"}});
+    const hdr=div({style:{background:"linear-gradient(135deg,#0c1e10,#0a0f1a)",borderBottom:"1px solid rgba(255,255,255,0.07)",padding:"24px 20px"}});
+    const hi=div({style:{maxWidth:"480px",margin:"0 auto"}});
+    hi.appendChild(div({style:{fontSize:"10px",letterSpacing:"4px",color:"#00e676",marginBottom:"4px"}},"⚽ THE GAFFER"));
+    hi.appendChild(div({style:{fontSize:"28px",fontWeight:900}},poll.title));
+    hi.appendChild(div({style:{fontSize:"14px",color:"rgba(255,255,255,0.45)",marginTop:"4px"}},poll.date));
+    hdr.appendChild(hi);wrap.appendChild(hdr);
+    const body=div({style:{maxWidth:"480px",margin:"0 auto",padding:"20px 16px 60px"}});
+    const grid=div({style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"22px"}});
+    [[inC,"IN ✅","rgba(34,197,94,0.1)","rgba(34,197,94,0.3)","#22c55e"],[outC,"OUT ❌","rgba(239,68,68,0.1)","rgba(239,68,68,0.3)",RED]].forEach(([v,l,bg,bc,c])=>{
+      grid.appendChild(div({style:{background:bg,border:"1px solid "+bc,borderRadius:"14px",padding:"16px 0",textAlign:"center"}},[div({style:{fontSize:"36px",fontWeight:900,color:c}},String(v)),div({style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",letterSpacing:"1px"}},l)]));
+    });
+    body.appendChild(grid);
+    body.appendChild(div({style:{fontSize:"13px",color:"rgba(255,255,255,0.4)",marginBottom:"16px",textAlign:"center"}},"Tap your name then your answer — updates instantly 🔄"));
+    activePl.forEach(p=>{
+      const v=votes[p.id];
+      const card=div({style:{background:v==="in"?"rgba(34,197,94,0.08)":v==="out"?"rgba(239,68,68,0.08)":"rgba(255,255,255,0.04)",border:"1px solid "+(v==="in"?"rgba(34,197,94,0.3)":v==="out"?"rgba(239,68,68,0.3)":"rgba(255,255,255,0.08)"),borderRadius:"13px",padding:"14px 16px",marginBottom:"10px"}});
+      const row=div({style:{display:"flex",alignItems:"center",gap:"12px"}});
+      row.appendChild(div({style:{width:"40px",height:"40px",borderRadius:"10px",background:pc(p.pos)+"18",border:"2px solid "+pc(p.pos)+"45",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:800,color:pc(p.pos),flexShrink:0}},p.pos));
+      const info=div({style:{flex:1}});
+      info.appendChild(div({style:{fontWeight:800,fontSize:"17px"}},p.name));
+      info.appendChild(div({style:{fontSize:"12px",color:v==="in"?"#22c55e":v==="out"?RED:"rgba(255,255,255,0.3)",marginTop:"2px",fontWeight:700}},v==="in"?"✅ In":v==="out"?"❌ Out":"Not voted yet"));
+      row.appendChild(info);
+      const vb=div({style:{display:"flex",gap:"8px",flexShrink:0}});
+      ["in","out"].forEach(val=>{
+        const vbtn=btn({onclick:async()=>{votes={...votes,[p.id]:val};await DB.set("shared/votes_"+pollId,votes);root.innerHTML="";root.appendChild(buildPollUI());},style:{background:v===val?(val==="in"?"#22c55e":RED):(val==="in"?"rgba(34,197,94,0.15)":"rgba(239,68,68,0.15)"),color:v===val?(val==="out"?"#fff":"#000"):(val==="in"?"#22c55e":RED),border:"none",borderRadius:"9px",padding:"10px 18px",fontWeight:800,fontSize:"14px",cursor:"pointer",fontFamily:"inherit",minWidth:"52px"}},val==="in"?"IN":"OUT");
+        vb.appendChild(vbtn);
+      });
+      row.appendChild(vb);card.appendChild(row);body.appendChild(card);
+    });
+    const inNames=activePl.filter(p=>votes[p.id]==="in");
+    if(inNames.length>0){
+      const box=div({style:{marginTop:"16px",background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"13px",padding:"16px"}});
+      box.appendChild(div({style:{fontSize:"11px",letterSpacing:"2px",color:"#22c55e",marginBottom:"8px"}},"✅ IN SO FAR"));
+      const chips=div({style:{display:"flex",flexWrap:"wrap",gap:"7px"}});
+      inNames.forEach(p=>chips.appendChild(span({style:{background:"rgba(34,197,94,0.15)",color:"#22c55e",border:"1px solid rgba(34,197,94,0.3)",padding:"4px 12px",borderRadius:"20px",fontSize:"13px",fontWeight:700}},p.name)));
+      box.appendChild(chips);body.appendChild(box);
+    }
+    body.appendChild(div({style:{marginTop:"20px",textAlign:"center",fontSize:"12px",color:"rgba(255,255,255,0.2)"}},"Powered by The Gaffer ⚽"));
+    wrap.appendChild(body);return wrap;
+  }
+
+  // Live updates
+  votes=await DB.get("shared/votes_"+pollId,{});
+  root.innerHTML="";root.appendChild(buildPollUI());
+  DB.on("shared/votes_"+pollId,v=>{votes=v||{};root.innerHTML="";root.appendChild(buildPollUI());});
+}
+</script>
+</body>
+</html>
